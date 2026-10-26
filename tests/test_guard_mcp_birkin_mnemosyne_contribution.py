@@ -14,24 +14,52 @@ from codex_plugin_scanner.guard.runtime.command_extensions import BUILT_IN_COMMA
 from codex_plugin_scanner.guard.runtime.extension_control_contract import ControlLayerKind, ControlState
 from codex_plugin_scanner.guard.runtime.local_cli_commands import LocalCliCommand
 from codex_plugin_scanner.guard.runtime.local_cli_identity import UnlistedCliIdentity
-from codex_plugin_scanner.guard.runtime.mcp_protection import build_mcp_server_identity
+from codex_plugin_scanner.guard.runtime.mcp_protection import McpServerIdentity, build_mcp_server_identity
 from codex_plugin_scanner.guard.runtime.mcp_server_grants import matching_mcp_contribution
 from codex_plugin_scanner.guard.store import GuardStore
 from tests.test_guard_mcp_server_grants import _AuthorityStore, _layer
 
 _CATALOG_ID: Final = "command.mcp-birkin-mnemosyne"
-_REVIEWED_TOOLS: Final = ("memory_remember", "memory_forget", "memory_restore", "memory_curate")
-_RECALL_TOOLS: Final = ("memory_search", "memory_get_note", "memory_list", "memory_related", "memory_curation_catalog")
+_REVIEWED_TOOLS: Final = (
+    "memory_remember",
+    "memory_forget",
+    "memory_restore",
+    "memory_curate",
+    "memory_review_apply",
+    "memory_review_undo",
+    "memory_index_register",
+    "memory_index_split",
+)
+_RECALL_TOOLS: Final = (
+    "memory_search",
+    "memory_get_note",
+    "memory_list",
+    "memory_related",
+    "memory_curation_catalog",
+    "memory_capacity",
+    "memory_review_questions",
+    "memory_identity_read",
+    "memory_kibitzer_candidates",
+    "memory_index_read",
+    "memory_open_trigger",
+    "memory_index_check",
+    "memory_startup_read",
+    "memory_startup_verify",
+)
 
 
-def _artifact(tool_name: str, package: str = "birkin-mnemosyne[mcp]") -> GuardArtifact:
-    identity = build_mcp_server_identity(
+def _identity(package: str = "birkin-mnemosyne[mcp]") -> McpServerIdentity:
+    return build_mcp_server_identity(
         config_path="",
         command="uvx",
         args=("--from", package, "mnemosyne-mcp", "--vault", "/chosen/vault"),
         transport="stdio",
         env={},
     )
+
+
+def _artifact(tool_name: str, package: str = "birkin-mnemosyne[mcp]") -> GuardArtifact:
+    identity = _identity(package)
     return build_tool_call_artifact(
         harness="claude-code",
         server_name="mnemosyne",
@@ -52,7 +80,7 @@ def test_catalog_is_external_and_off() -> None:
     assert payload["activation"] == "opt-in"
 
 
-@pytest.mark.parametrize("package", ("birkin-mnemosyne[mcp]", "birkin-mnemosyne[mcp]==0.4.0"))
+@pytest.mark.parametrize("package", ("birkin-mnemosyne[mcp]", "birkin-mnemosyne[mcp]==0.7.0"))
 def test_documented_launcher_matches_with_extras_and_user_vault(package: str) -> None:
     matched = matching_mcp_contribution(_artifact("memory_remember", package))
     assert matched is not None
@@ -85,13 +113,7 @@ def test_mutation_does_not_weaken_existing_block() -> None:
 
 def test_custom_device_grant_wins_over_enabled_contribution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     artifact = _artifact("memory_remember")
-    identity = build_mcp_server_identity(
-        config_path="",
-        command="uvx",
-        args=("--from", "birkin-mnemosyne[mcp]", "mnemosyne-mcp", "--vault", "/chosen/vault"),
-        transport="stdio",
-        env={},
-    )
+    identity = _identity()
     store = GuardStore(tmp_path / "guard-home")
     enabled = _AuthorityStore((_layer(ControlLayerKind.LOCAL_ADMIN, _CATALOG_ID, ControlState.ENABLED),))
     monkeypatch.setattr(
