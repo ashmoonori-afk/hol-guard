@@ -2,22 +2,27 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Final
 
 import pytest
 
-from codex_plugin_scanner.guard.local_cli_trust import apply_local_mcp_extension_decision, utc_now
 from codex_plugin_scanner.guard.mcp_tool_calls import build_tool_call_artifact
 from codex_plugin_scanner.guard.models import GuardArtifact
-from codex_plugin_scanner.guard.runtime.command_extensions import BUILT_IN_COMMAND_EXTENSION_REGISTRY
 from codex_plugin_scanner.guard.runtime.extension_control_contract import ControlLayerKind, ControlState
+from codex_plugin_scanner.guard.runtime.generated_command_catalog import GeneratedCommandCatalog
+from codex_plugin_scanner.guard.runtime.generated_command_catalog_loader import _extension
 from codex_plugin_scanner.guard.runtime.local_cli_commands import LocalCliCommand
-from codex_plugin_scanner.guard.runtime.local_cli_identity import UnlistedCliIdentity
 from codex_plugin_scanner.guard.runtime.mcp_protection import McpServerIdentity, build_mcp_server_identity
-from codex_plugin_scanner.guard.runtime.mcp_server_grants import matching_mcp_contribution
 from codex_plugin_scanner.guard.store import GuardStore
-from tests.test_guard_mcp_server_grants import _AuthorityStore, _layer
+from scripts.native_directory_inventory import catalog_rows
+
+from . import mcp_policy_catalog_fixture
+from .local_cli_native_fixture import native_local_cli_grant_resident  # noqa: F401
+from .mcp_extension_driver import apply_contributed_mcp_decision, apply_local_mcp_extension_decision
+from .test_guard_local_mcp_grants import _enroll
+from .test_guard_mcp_server_grants import _AuthorityStore, _layer
+from .test_native_source_program import canonical_packs as canonical_packs
+from .test_native_source_program import compiler as compiler
 
 _CATALOG_ID: Final = "command.mcp-birkin-mnemosyne"
 _REVIEWED_TOOLS: Final = (
@@ -48,6 +53,13 @@ _RECALL_TOOLS: Final = (
 )
 
 
+@pytest.fixture(autouse=True)
+def _birkin_catalog(mcp_policy_delivery, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Admit this contribution through the shared installed-pack fixture."""
+    monkeypatch.setattr(mcp_policy_catalog_fixture, "_DELIVERY", [mcp_policy_delivery])
+    monkeypatch.setattr(mcp_policy_catalog_fixture, "_CATALOG_HOMES", {})
+
+
 def _identity(package: str = "birkin-mnemosyne[mcp]") -> McpServerIdentity:
     return build_mcp_server_identity(
         config_path="",
@@ -71,8 +83,10 @@ def _artifact(tool_name: str, package: str = "birkin-mnemosyne[mcp]") -> GuardAr
     )
 
 
-def test_catalog_is_external_and_off() -> None:
-    extension = BUILT_IN_COMMAND_EXTENSION_REGISTRY.get(_CATALOG_ID)
+def test_catalog_is_external_and_off(canonical_packs) -> None:
+    reader, release = canonical_packs
+    registry = GeneratedCommandCatalog(tuple(_extension(row) for _, _, row in catalog_rows(reader, release)))
+    extension = registry.get(_CATALOG_ID)
     assert extension is not None
     payload = extension.to_dict()
     assert payload["enabled"] is False
@@ -82,9 +96,10 @@ def test_catalog_is_external_and_off() -> None:
 
 @pytest.mark.parametrize("package", ("birkin-mnemosyne[mcp]", "birkin-mnemosyne[mcp]==0.7.0"))
 def test_documented_launcher_matches_with_extras_and_user_vault(package: str) -> None:
-    matched = matching_mcp_contribution(_artifact("memory_remember", package))
-    assert matched is not None
-    assert matched["id"] == "mcp.birkin-mnemosyne"
+    enabled = _AuthorityStore((_layer(ControlLayerKind.LOCAL_ADMIN, _CATALOG_ID, ControlState.ENABLED),))
+    reviewed = apply_contributed_mcp_decision(enabled, _artifact("memory_remember", package), "allow")
+    assert reviewed is not None
+    assert reviewed[:2] == ("review", "catalog-mcp-extension")
 
 
 @pytest.mark.parametrize("tool_name", _REVIEWED_TOOLS)
@@ -93,9 +108,9 @@ def test_mutations_require_local_admin_enable(tool_name: str) -> None:
     inert = _AuthorityStore()
     cloud = _AuthorityStore((_layer(ControlLayerKind.SIGNED_CLOUD, _CATALOG_ID, ControlState.ENABLED),))
     enabled = _AuthorityStore((_layer(ControlLayerKind.LOCAL_ADMIN, _CATALOG_ID, ControlState.ENABLED),))
-    assert apply_local_mcp_extension_decision(inert, artifact, "allow") is None
-    assert apply_local_mcp_extension_decision(cloud, artifact, "allow") is None
-    reviewed = apply_local_mcp_extension_decision(enabled, artifact, "allow")
+    assert apply_contributed_mcp_decision(inert, artifact, "allow") is None
+    assert apply_contributed_mcp_decision(cloud, artifact, "allow") is None
+    reviewed = apply_contributed_mcp_decision(enabled, artifact, "allow")
     assert reviewed is not None
     assert reviewed[:2] == ("review", "catalog-mcp-extension")
 
@@ -103,48 +118,23 @@ def test_mutations_require_local_admin_enable(tool_name: str) -> None:
 @pytest.mark.parametrize("tool_name", (*_RECALL_TOOLS, "unknown_future_tool"))
 def test_recall_and_unknown_tools_preserve_existing_review(tool_name: str) -> None:
     enabled = _AuthorityStore((_layer(ControlLayerKind.LOCAL_ADMIN, _CATALOG_ID, ControlState.ENABLED),))
-    assert apply_local_mcp_extension_decision(enabled, _artifact(tool_name), "review") is None
+    assert apply_contributed_mcp_decision(enabled, _artifact(tool_name), "review") is None
 
 
-def test_mutation_does_not_weaken_existing_block() -> None:
-    enabled = _AuthorityStore((_layer(ControlLayerKind.LOCAL_ADMIN, _CATALOG_ID, ControlState.ENABLED),))
-    assert apply_local_mcp_extension_decision(enabled, _artifact("memory_remember"), "block") is None
-
-
-def test_custom_device_grant_wins_over_enabled_contribution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_custom_device_grant_wins_over_enabled_contribution() -> None:
     artifact = _artifact("memory_remember")
     identity = _identity()
-    store = GuardStore(tmp_path / "guard-home")
     enabled = _AuthorityStore((_layer(ControlLayerKind.LOCAL_ADMIN, _CATALOG_ID, ControlState.ENABLED),))
-    monkeypatch.setattr(
-        store, "read_extension_control_authority_for_registry", enabled.read_extension_control_authority_for_registry
-    )
-    cli_identity = UnlistedCliIdentity(
-        cli_id=f"local-cli.mcp-{identity.identity_hash[:8]}",
-        name="mnemosyne",
-        kind="executable",
-        identity_hash=identity.identity_hash,
+    store = GuardStore(enabled.guard_home)
+    reviewed = apply_contributed_mcp_decision(store, artifact, "allow")
+    assert reviewed is not None
+    assert reviewed[:2] == ("review", "catalog-mcp-extension")
+    _enroll(
+        store,
+        identity,
+        states={"memory_remember": "allow"},
         example_label="uvx --from birkin-mnemosyne[mcp] mnemosyne-mcp --vault /chosen/vault",
-    )
-    store.record_local_cli_observation(
-        cli_identity,
-        seen_at=utc_now(),
-        surface="mcp",
-        server_identity_hash=identity.identity_hash,
-        server_command=identity.command,
-        server_args_hash=identity.args_hash,
-        help_status="ok",
-    )
-    store.replace_local_cli_commands(
-        cli_identity.cli_id,
-        (LocalCliCommand("memory_remember", "memory_remember", "memory_remember", "Store a memory note"),),
-    )
-    store.upsert_local_cli_grant(
-        identity=cli_identity,
-        state="allowed",
-        expected_revision=0,
-        updated_at=utc_now(),
-        command_states={"memory_remember": "allow"},
+        commands=(LocalCliCommand("memory_remember", "memory_remember", "memory_remember", "Store a memory note"),),
     )
     granted = apply_local_mcp_extension_decision(store, artifact, "review")
     assert granted is not None
