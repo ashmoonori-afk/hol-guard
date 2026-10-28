@@ -34,6 +34,8 @@ _REVIEWED_TOOLS: Final = (
     "memory_review_undo",
     "memory_index_register",
     "memory_index_split",
+    "memory_handoff_capture",
+    "memory_handoff_fold",
 )
 _RECALL_TOOLS: Final = (
     "memory_search",
@@ -50,6 +52,7 @@ _RECALL_TOOLS: Final = (
     "memory_index_check",
     "memory_startup_read",
     "memory_startup_verify",
+    "memory_handoff_read",
 )
 
 
@@ -123,14 +126,16 @@ def test_recall_and_unknown_tools_preserve_existing_review(tool_name: str) -> No
 
 @pytest.mark.parametrize("enabled", (False, True))
 @pytest.mark.parametrize("current_action", ("allow", "block"))
-@pytest.mark.parametrize("tool_name", ("unknown_future_tool", "memory_search"))
+@pytest.mark.parametrize(
+    "tool_name", ("unknown_future_tool", *_RECALL_TOOLS, "memory_handoff_capture", "memory_handoff_fold")
+)
 def test_unknown_tool_only_tightens_allow_when_locally_enabled(
     enabled: bool, current_action: GuardAction, tool_name: str
 ) -> None:
     state = ControlState.ENABLED if enabled else ControlState.DISABLED
     store = _AuthorityStore((_layer(ControlLayerKind.LOCAL_ADMIN, _CATALOG_ID, state),))
     result = apply_contributed_mcp_decision(store, _artifact(tool_name), current_action)
-    if enabled and tool_name == "unknown_future_tool" and current_action == "allow":
+    if enabled and tool_name not in _RECALL_TOOLS and current_action == "allow":
         assert result is not None
         assert result[:2] == ("review", "catalog-mcp-extension")
     else:
