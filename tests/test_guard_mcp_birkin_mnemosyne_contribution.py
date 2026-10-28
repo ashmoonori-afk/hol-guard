@@ -105,6 +105,15 @@ def test_documented_launcher_matches_with_extras_and_user_vault(package: str) ->
     assert reviewed[:2] == ("review", "catalog-mcp-extension")
 
 
+@pytest.mark.parametrize(
+    "package",
+    ("birkin-mnemosyne[mcp,semantic]", "birkin_mnemosyne[mcp]", "birkin-mnemosyne", "birkin-mnemosyne[semantic]"),
+)
+def test_undeclared_launcher_spellings_are_outside_this_entry(package: str) -> None:
+    enabled = _AuthorityStore((_layer(ControlLayerKind.LOCAL_ADMIN, _CATALOG_ID, ControlState.ENABLED),))
+    assert apply_contributed_mcp_decision(enabled, _artifact("memory_remember", package), "allow") is None
+
+
 @pytest.mark.parametrize("tool_name", _REVIEWED_TOOLS)
 def test_mutations_require_local_admin_enable(tool_name: str) -> None:
     artifact = _artifact(tool_name)

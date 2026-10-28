@@ -61,6 +61,7 @@
     "Use memory_remember mode=create to avoid overwriting notes; replace requires expected_version from a fresh memory_get_note.",
     "Preview memory_forget with confirm=false and memory_curate with apply=false before approving archival or curation.",
     "Use an explicitly selected vault with only intended notes; its path is not an OS sandbox, and existing symlinks can expose other files.",
-    "Check or restrict MNEMOSYNE_IDENTITY_ROOT / --identity-root too: memory_identity_read and memory_startup_read can read files under that separate root outside the selected vault."
+    "Check or restrict MNEMOSYNE_IDENTITY_ROOT / --identity-root too: memory_identity_read and memory_startup_read can read files under that separate root outside the selected vault.",
+    "Launch exactly birkin-mnemosyne[mcp] (optionally ==VERSION). Other spellings such as [mcp,semantic], birkin_mnemosyne or no extra are outside this entry and keep your ordinary Guard policy."
   ]
 }
