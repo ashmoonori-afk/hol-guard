@@ -43,7 +43,7 @@
     { "name": "memory_index_split", "state": "review" },
     { "name": "memory_startup_read", "state": "inherit" },
     { "name": "memory_startup_verify", "state": "inherit" },
-    { "name": "other", "state": "inherit" }
+    { "name": "other", "state": "review" }
   ],
   "referenceUrls": [
     "https://github.com/ashmoonori-afk/birkin-mnemosyne/blob/08e518d31bb71e5e8c530a5a0f8930c5f194b300/README.md",

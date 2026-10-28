@@ -7,7 +7,7 @@ from typing import Final
 import pytest
 
 from codex_plugin_scanner.guard.mcp_tool_calls import build_tool_call_artifact
-from codex_plugin_scanner.guard.models import GuardArtifact
+from codex_plugin_scanner.guard.models import GuardAction, GuardArtifact
 from codex_plugin_scanner.guard.runtime.extension_control_contract import ControlLayerKind, ControlState
 from codex_plugin_scanner.guard.runtime.generated_command_catalog import GeneratedCommandCatalog
 from codex_plugin_scanner.guard.runtime.generated_command_catalog_loader import _extension
@@ -119,6 +119,22 @@ def test_mutations_require_local_admin_enable(tool_name: str) -> None:
 def test_recall_and_unknown_tools_preserve_existing_review(tool_name: str) -> None:
     enabled = _AuthorityStore((_layer(ControlLayerKind.LOCAL_ADMIN, _CATALOG_ID, ControlState.ENABLED),))
     assert apply_contributed_mcp_decision(enabled, _artifact(tool_name), "review") is None
+
+
+@pytest.mark.parametrize("enabled", (False, True))
+@pytest.mark.parametrize("current_action", ("allow", "block"))
+@pytest.mark.parametrize("tool_name", ("unknown_future_tool", "memory_search"))
+def test_unknown_tool_only_tightens_allow_when_locally_enabled(
+    enabled: bool, current_action: GuardAction, tool_name: str
+) -> None:
+    state = ControlState.ENABLED if enabled else ControlState.DISABLED
+    store = _AuthorityStore((_layer(ControlLayerKind.LOCAL_ADMIN, _CATALOG_ID, state),))
+    result = apply_contributed_mcp_decision(store, _artifact(tool_name), current_action)
+    if enabled and tool_name == "unknown_future_tool" and current_action == "allow":
+        assert result is not None
+        assert result[:2] == ("review", "catalog-mcp-extension")
+    else:
+        assert result is None
 
 
 def test_custom_device_grant_wins_over_enabled_contribution() -> None:
